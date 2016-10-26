@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="http://d3js.org/d3.v3.min.js"></script>
+  <script src="http://dimplejs.org/dist/dimple.v2.0.0.min.js"></script>
+  <style>
+    h2 {
+      text-align: center;
+      color: black;
+    }
+
+    .text {
+      style=font-size:130%
+    }
+
+    .resize path {
+      fill: #666;
+      fill-opacity: .8;
+      stroke: #000;
+      stroke-width: 1.5px;
+    }
+
+    .axis path, .axis line {
+      fill: none;
+      stroke: #000;
+      shape-rendering: crispEdges;
+    }
+
+    .brush .extent {
+      fill-opacity: .125;
+      shape-rendering: crispEdges;
+    }
+
+    .chart-region {
+      border:1px;
+      border-color: #666;
+      border-style: solid;
+      float:left;
+      background-color:#f8f8f8;
+
+    }
+  </style>
+  <script type="text/javascript">  
+    function draw(data) {
+      "use strict";
+      var margin = 75,
+          width = 1400 - margin,
+          height_chart = 600 - margin,
+          height_slider = 20,
+          buttons_loc = 575,
+          slider_loc = buttons_loc + 75,
+          slider_text_loc = slider_loc + 75;
+
+      // d3.select("body")
+      //   .append("h2")
+      //   .text("Momentum into Playoffs");
+
+      var svg = d3.select("#chart-div")
+          .append("svg")
+          .attr("id", "main-plot")
+          .attr("width", width + margin)
+          .attr("height", 750);
+
+      d3.select("#main-plot")
+        .append('text')
+        .text("Momentum into Playoffs")
+        .style("font-size", 24)
+        .attr("x", 0.45*width)
+        .attr("y", 40)
+    
+      function draw_chart(vals, game_range, most, least){
+        d3.selectAll('g.chart').remove();
+        var chart_g = d3.select('svg').append('g').attr('class','chart')
+        var chart = new dimple.chart(chart_g);
+        chart.height = height_chart- (3/2)*margin;
+        chart.assignColor('normal', '#80B1D3','#6b94b0', 0.2);
+        chart.assignColor('average', '#FB8072', '#d26b5f', 0.8);
+        var xaxis = chart.addCategoryAxis("x",'level');
+        var yaxis = chart.addMeasureAxis("y", 'wins');
+        xaxis.title = 'How far a team advanced'
+        yaxis.title = 'Wins (out of ' + Math.round((game_range[1] - game_range[0] + 1)).toString() + ' games)';
+        yaxis.overrideMax = 1.02 * most;
+        yaxis.overrideMin  = 0.98 * least;
+        yaxis.tickFormat = ',.1f';
+
+        var myScatter = chart.addSeries(['team', 'type'], dimple.plot.bubble);
+        myScatter.data = vals;
+        xaxis.addOrderRule(['LDS', 'LCS', 'WS', 'Champs']);
+        chart.draw();
+
+        var opacity = 0.4;
+        var r1 = 11;
+        var r2 = 21;
+        d3.selectAll(".dimple-bubble").attr("r", r1).attr('opacity',opacity);
+        //Make Averages bigger
+        d3.selectAll(".dimple-average").attr("r",r2).attr('opacity', 0.8);
+
+        //change font size
+        var font_size = 16;
+        d3.selectAll(".dimple-title").style('font-size', font_size);
+      };
+
+      //Brush Slider
+      function draw_slider(range){
+        d3.selectAll("g.slider").remove();
+        d3.select("#range").remove();
+
+        var x_slider = d3.scale.linear()
+            .domain([1, 162])
+            .range([margin/2, width - (3/2)*margin]);
+
+        var brush = d3.svg.brush()
+            .x(x_slider)
+            .extent(range)
+            .on("brushstart", brushstart)
+            .on("brush", brushmove)
+            .on("brushend", brushend);
+
+        var arc = d3.svg.arc()
+            .outerRadius(height_slider / 2)
+            .startAngle(0)
+            .endAngle(function(d, i) { return i ? -Math.PI : Math.PI; });
+
+        var slider = svg.append("g")
+            .attr('class','slider')
+            .attr("transform", "translate(" + margin + "," + slider_loc + ")");
+
+        slider.append("g")
+            .attr("class", "x axis")
+            .attr("transform", "translate(0," + height_slider + ")")
+            .call(d3.svg.axis().scale(x_slider).orient("bottom"));
+
+        var brushg = slider.append("g")
+            .attr("class", "brush")
+            .call(brush);
+
+        brushg.selectAll(".resize").append("path")
+            .attr("transform", "translate(0," +  height_slider / 2 + ")")
+            .attr("d", arc);
+
+        brushg.selectAll("rect")
+            .attr("height", height_slider);
+
+        var rangeText = svg.append('text')
+            .attr("x", brushg.select('rect.background').attr('width')/2)
+            .attr("y", slider_text_loc)
+            .attr("id", "range")
+            .text("Selected games (" + Math.round(range[0]) + " through " 
+              + Math.round(range[1]) + ")" + " Total: " 
+              + Math.round((range[1] - range[0] + 1)) + " games");
+
+        function brushstart() {
+          slider.classed("selecting", true);
+        }
+
+        function brushmove() {
+          var range = brush.extent();
+          var begin =  Math.round(range[0]);
+          var end =  Math.round(range[1]);
+          var text = "Selected games (" + begin + " through " + end + ")" +
+            " Total: " + (end-begin+1) + " games";
+          d3.select("#range").text(text);
+        }
+
+        function brushend() {
+          var range = brush.extent();
+          console.log(range);
+          slider.classed("selecting", !d3.event.target.empty());
+          filter_data(range);
+        }
+      }
+
+      function filter_data(range){
+        debugger;
+        var vals = [];
+        var begin =  Math.round(range[0] - 1);
+        var end =  Math.round(range[1] - 1);
+        var most = 0.;
+        var least = 162.;
+       //debugger;
+        var levels = ['LDS', 'LCS', 'WS', 'Champs'];
+        for (var i = 0; i < levels.length; i++){
+          var level = levels[i];
+          var total_wins = 0;
+          var count = 0;
+          for (var team in data[level]){
+            //vals[team] = [];
+            var wins = d3.sum(data[level][team].slice(begin, end+1));
+            total_wins += wins;
+            count ++;
+            vals.push({'team':team, 'wins':wins, 'level':level, 'type':'team'});
+            if (wins > most){ most = wins;}  //update most for auto-axis scale
+            else if (wins < least) { least = wins;} //update least for auto-axis scale
+          }
+          vals.push({'team':'Average', 'wins':total_wins/count, 'level':level, 'type':'average'});
+        }
+
+        draw_chart(vals, range, most, least);
+      }
+
+
+    //Draw Selection Buttons
+    //Adapted from: http://bl.ocks.org/nikhilNathwani/5dca6c63a53934185d05
+    function draw_buttons(){
+      var defaultButtonColor = '#4286f4';
+      var hoverButtonColor = '#1160e0';
+      var selectedButtonColor = '#013589';
+
+      var labels = [['Full Season', 1, 162],
+                ['1st Half', 1, 81],
+                ['2nd Half', 82, 162],
+                ['Final Month', 133, 162],
+                ['Last 10', 153, 162],
+                ['Last Game', 161.95, 162]]; //brush disappears if range is 0
+
+      var nButtons = labels.length;
+      var bSpace = 10;
+      var bMargin = 120;
+      var bHeight = 40;
+      var bWidth = (d3.select("#main-plot").attr("width") -
+        2*bMargin + bSpace) / nButtons - bSpace;
+      var buttonsGroup = d3.select("#main-plot").append("g")
+        .attr("id", "buttonsGroup")
+        .attr("transform", "translate(0, "+ buttons_loc + ")");
+
+      for (var i = 0; i < labels.length; i++){
+        var button = buttonsGroup.append('g')
+          .attr('id', 'button-'+i)
+          .on('mouseover', function(){
+            if (d3.select(this).select('rect').attr("fill") != selectedButtonColor){
+              d3.select(this).select('rect').attr('fill', hoverButtonColor); 
+            }
+          })
+          .on('mouseout', function(){
+            if (d3.select(this).select('rect').attr("fill") != selectedButtonColor){
+              d3.select(this).select('rect').attr('fill', defaultButtonColor); 
+            }
+          })
+          .on('click', function(){
+            d3.select(this.parentNode)
+              .selectAll('rect')
+              .attr("fill", defaultButtonColor);
+            d3.select(this)
+              .select('rect')
+              .attr("fill", selectedButtonColor);
+            var idx = this.id.split("-")[1]
+            draw_slider([labels[idx][1], labels[idx][2]]);
+            filter_data([labels[idx][1], labels[idx][2]]);
+
+          });
+
+        button.append('rect')
+          .attr("x", i*(bWidth + bSpace) + bMargin)
+          .attr("y", 0)
+          .attr("height", bHeight)
+          .attr("width", bWidth)
+          .attr("fill", defaultButtonColor)
+
+        button.append('text')
+          .attr("x", i*(bWidth + bSpace) + bMargin + bWidth/2)
+          .attr("y", 0.6*bHeight)
+          .attr('fill', 'white')
+          .text(labels[i][0])
+          .style("text-anchor", "middle")
+      }
+      //Set Final Month as the initial button selected
+      d3.select("#button-3").select('rect').attr("fill", selectedButtonColor);
+    }
+
+  //Add Legend
+  var legend = d3.select("#main-plot").append("g")
+    .attr('id', "legend")
+    .attr('transform', 'translate(1290, 250)')
+
+  legend.append('circle')
+    .attr("cx", 30)
+    .attr("cy", 20)
+    .attr("r", 11)
+    .attr("fill", "#80B1D3")
+    .attr("stroke", "#6b94b0")
+    .attr("opacity", 0.3);
+
+  legend.append('circle')
+  .attr("cx", 30)
+  .attr("cy", 90)
+  .attr("r", 21)
+  .attr("fill", "#FB8072")
+  .attr("stroke", "#d26b5f")
+  .attr("opacity", 0.8);
+
+  legend.append('text')
+    .attr("x", 30)
+    .attr("y", 50)
+    .text('Single Team')
+    .style('text-anchor', 'middle')
+
+  legend.append('text')
+    .attr("x", 30)
+    .attr("y", 125)
+    .text('Group Average')
+    .style('text-anchor', 'middle')
+
+  draw_slider([133, 162]);
+  filter_data([133, 162]);
+  draw_buttons();
+  };
+  </script>
+
+</head>
+<body>
+<div id="chart-div" class='chart-region'>
+  <script type="text/javascript">
+    d3.json("data.json", draw);    
+  </script>
+</div>
+<div id='text-div' class='chart-region' style='padding:10px; width:300px; height:734px'>
+  <h3> Discussion </h3>
+  <p class='text'> There is often an idea that a team that plays
+    well heading in to the postseason will fair
+     better than a team that scuffles down the stretch.
+  <p class='text'> However, there is no noticeable difference in how far a team advances 
+    (Divisional Round, Championship Round, World Series, Winning World Series)
+    when compared to their winning percentage over the last month, last week, or even last day of the season.
+  <p class='text'> In fact, over the course of the whole season, World Series Champions had 94.6 wins 
+    on average compared to 93.8 wins for those that lost in the first round which is nearly no noticeable difference.
+  <p class='text'> It doesn't matter how many wins you have going in to the playoffs, or how many wins you've had recently.
+    All that matter is making it, and then a teams chances are about as good as any other.
+  <p class='text'> The plot shows a blue dot for every team that made the playoffs for the past 20 years.  The buttons and filter slider allows you to compare the winrates between the teams for a smaller group of games, and compare how 'hot' teams were at different parts of the season and whether it affected playoff results.
+</div>
+</body>
+</html>
